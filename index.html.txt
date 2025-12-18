@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Mini PvZ Clone</title>
+    <style>
+        body { background: #333; display: flex; flex-direction: column; align-items: center; color: white; font-family: sans-serif; }
+        canvas { background: #55832f; border: 5px solid #222; cursor: crosshair; }
+        .stats { margin-bottom: 10px; font-size: 24px; }
+    </style>
+</head>
+<body>
+
+    <div class="stats">Sóis: <span id="sunCount">50</span></div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const sunDisplay = document.getElementById('sunCount');
+
+        let suns = 50;
+        let plants = [];
+        let zombies = [];
+        let projectiles = [];
+        let frame = 0;
+
+        // Configuração da Grade
+        const cellSize = 80;
+        const rows = 5;
+        const cols = 10;
+
+        class Plant {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = cellSize - 10;
+                this.height = cellSize - 10;
+                this.timer = 0;
+            }
+            draw() {
+                ctx.fillStyle = 'lime'; // Representando a Disparervilha
+                ctx.fillRect(this.x + 5, this.y + 5, this.width, this.height);
+            }
+            update() {
+                this.timer++;
+                if (this.timer % 100 === 0) { // Atira a cada 100 frames
+                    projectiles.push(new Projectile(this.x + 70, this.y + 30));
+                }
+            }
+        }
+
+        class Zombie {
+            constructor(y) {
+                this.x = canvas.width;
+                this.y = y;
+                this.speed = 0.5;
+                this.health = 100;
+            }
+            draw() {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(this.x, this.y + 10, 50, 60);
+            }
+            update() {
+                this.x -= this.speed;
+            }
+        }
+
+        class Projectile {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.speed = 4;
+            }
+            draw() {
+                ctx.fillStyle = 'yellow';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            update() {
+                this.x += this.speed;
+            }
+        }
+
+        // Desenhar a grade do gramado
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+            for (let i = 0; i < canvas.width; i += cellSize) {
+                for (let j = 0; j < canvas.height; j += cellSize) {
+                    ctx.strokeRect(i, j, cellSize, cellSize);
+                }
+            }
+        }
+
+        function handleGame() {
+            // Lógica dos Projéteis
+            projectiles.forEach((p, index) => {
+                p.update();
+                p.draw();
+                // Remover se sair da tela
+                if (p.x > canvas.width) projectiles.splice(index, 1);
+            });
+
+            // Lógica das Plantas
+            plants.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            // Lógica dos Zumbis
+            if (frame % 300 === 0) { // Nasce um zumbi a cada 300 frames
+                let randomRow = Math.floor(Math.random() * rows) * cellSize;
+                zombies.push(new Zombie(randomRow));
+            }
+
+            zombies.forEach((z, zIdx) => {
+                z.update();
+                z.draw();
+
+                // Colisão Projétil vs Zumbi
+                projectiles.forEach((p, pIdx) => {
+                    if (p.x > z.x && p.x < z.x + 50 && p.y > z.y && p.y < z.y + 80) {
+                        z.health -= 25;
+                        projectiles.splice(pIdx, 1);
+                    }
+                });
+
+                if (z.health <= 0) zombies.splice(zIdx, 1);
+                if (z.x < 0) alert("Os zumbis comeram seu cérebro!");
+            });
+        }
+
+        // Clique para plantar (Custa 50 sóis)
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const gridX = Math.floor(mouseX / cellSize) * cellSize;
+            const gridY = Math.floor(mouseY / cellSize) * cellSize;
+
+            if (suns >= 50) {
+                plants.push(new Plant(gridX, gridY));
+                suns -= 50;
+                sunDisplay.innerText = suns;
+            }
+        });
+
+        // Loop de geração de sol (automático para simplificar)
+        setInterval(() => {
+            suns += 25;
+            sunDisplay.innerText = suns;
+        }, 5000);
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            handleGame();
+            frame++;
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
