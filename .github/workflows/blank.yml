@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Emoji PvZ - Final</title>
+    <style>
+        body { background: #111; color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; overflow: hidden; }
+        #menuPrincipal, #menuPause, #gameOverScreen, #selectionMenu { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; text-align: center; }
+        #menuPause, #gameOverScreen, #selectionMenu { display: none; }
+        button { padding: 12px 30px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 8px; margin: 10px; font-weight: bold; }
+        .ui { margin: 10px; display: flex; gap: 15px; align-items: center; background: #333; padding: 12px; border-radius: 12px; border: 2px solid #555; z-index: 10; }
+        .deck { display: flex; gap: 8px; min-width: 50px; }
+        .card { position: relative; width: 55px; height: 75px; border: 2px solid #777; cursor: pointer; border-radius: 8px; text-align: center; background: #444; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .card.selected { border-color: #f1c40f; background: #666; box-shadow: 0 0 10px #f1c40f; }
+        .cooldown-overlay { position: absolute; top: 0; left: 0; width: 100%; background: rgba(0, 0, 0, 0.7); z-index: 2; pointer-events: none; }
+        .picker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .picker-card { width: 65px; height: 85px; border: 2px solid #555; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #333; }
+        .picker-card.active { border: 2px solid #4CAF50; background: #2e4d2f; }
+        canvas { border: 5px solid #1a3c1f; cursor: crosshair; background: #222; }
+        .selected-shovel { border: 3px solid #f44336; box-shadow: 0 0 10px #f44336; background: #888; border-radius: 12px; padding: 7px; }
+    </style>
+</head>
+<body>
+
+    <div id="menuPrincipal">
+        <h1>EMOJI PvZ</h1>
+        <button onclick="startGame()">INICIAR JOGO</button>
+    </div>
+
+    <div id="selectionMenu">
+        <h2 id="selectionTitle">ESCOLHA SUAS PLANTAS</h2>
+        <div id="pickerGrid" class="picker-grid"></div>
+        <button onclick="confirmSelection()">COMEÇAR FASE</button>
+    </div>
+
+    <div id="menuPause">
+        <h1>PAUSADO</h1>
+        <button onclick="togglePause()">VOLTAR</button>
+        <button onclick="inputCode()" style="background:#2196F3">CODE</button>
+    </div>
+
+    <div id="gameOverScreen">
+        <h1 style="color:#ff4444">GAME OVER</h1>
+        <button onclick="location.reload()">REINICIAR</button>
+    </div>
+
+    <div class="ui">
+        <div>☀️ <span id="sunCount">100</span> | 🧟 <span id="waveCount">1</span>/10 | <span id="phaseName">Dia</span></div>
+        <div class="deck" id="deck"></div>
+        <div id="shovel" onclick="selectShovel()" style="cursor:pointer; font-size: 24px; padding: 10px;">🧹</div>
+        <button onclick="togglePause()">⏸️ Menu</button>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas'), ctx = canvas.getContext('2d');
+        const sunDisplay = document.getElementById('sunCount'), waveDisplay = document.getElementById('waveCount'), phaseDisplay = document.getElementById('phaseName');
+        const deckContainer = document.getElementById('deck'), shovelIcon = document.getElementById('shovel');
+
+        let suns = 100, wave = 1, frame = 0, plants = [], zombies = [], projectiles = [], fallingSuns = [], mowers = [];
+        let selectedPlantType = '', shovelActive = false, gameRunning = false, isPaused = false, hasCatCode = false;
+        let gamePhase = 'day', chosenDeck = ['pea', 'shooter', 'nut', 'potato'], maxSlots = 4;
+        const cellSize = 80, rows = 5;
+
+        const allPlants = {
+            pea: { icon: '🌻', cost: 50, type: 'sun', cd: 300, last: -300 },
+            shooter: { icon: '🌿', cost: 100, type: 'attack', cd: 400, last: -400 },
+            nut: { icon: '🛡️', cost: 50, type: 'defense', cd: 800, last: -800 },
+            potato: { icon: '🥔', cost: 25, type: 'mine', cd: 360, last: -360 }, 
+            mushSun: { icon: '🏮', cost: 50, type: 'sun', cd: 300, last: -300 },
+            mushFraid: { icon: '👻', cost: 25, type: 'fraidy', cd: 350, last: -350 },
+            mushBig: { icon: '🍄', cost: 100, type: 'pierce', cd: 600, last: -600 },
+            lily: { icon: '🍀', cost: 25, type: 'lily', cd: 200, last: -200 },
+            cattail: { icon: '🐱', cost: 225, type: 'homing', cd: 600, last: -600 }
+        };
+
+        function startGame() { 
+            document.getElementById('menuPrincipal').style.display = 'none';
+            resetLevelState();
+            gameRunning = true; 
+            animate(); 
+        }
+
+        function resetLevelState() {
+            suns = 100; sunDisplay.innerText = suns;
+            wave = 1; waveDisplay.innerText = wave;
+            plants = []; zombies = []; projectiles = []; fallingSuns = [];
+            mowers = [];
+            for(let i=0; i<rows; i++) mowers.push({x: -40, y: i * cellSize, active: true, moving: false});
+            updateDeckUI();
+        }
+
+        function inputCode() {
+            let code = prompt("").toLowerCase();
+            if (code === "noite") { gamePhase = 'night'; phaseDisplay.innerText = "Noite"; nextLevelSetup(); togglePause(); }
+            else if (code === "agua") { gamePhase = 'water'; phaseDisplay.innerText = "Água"; nextLevelSetup(); togglePause(); }
+            else if (code === "cat") {
+                if (!hasCatCode) { hasCatCode = true; if (!chosenDeck.includes('cattail')) chosenDeck.push('cattail'); updateDeckUI(); }
+                togglePause();
+            }
+            else if (code === "sun") { suns += 1000; sunDisplay.innerText = suns; togglePause(); }
+        }
+
+        function nextLevelSetup() { resetLevelState(); openSelectionMenu(); }
+
+        function openSelectionMenu() {
+            isPaused = true;
+            document.getElementById('selectionMenu').style.display = 'flex';
+            const grid = document.getElementById('pickerGrid');
+            grid.innerHTML = '';
+            maxSlots = (gamePhase === 'water') ? 5 : 4;
+            if (hasCatCode) maxSlots++; 
+            let tempDeck = hasCatCode ? ['cattail'] : [];
+            for (let key in allPlants) {
+                if (key === 'cattail') continue;
+                if (key === 'lily' && gamePhase !== 'water') continue;
+                const p = allPlants[key];
+                const item = document.createElement('div');
+                item.className = 'picker-card';
+                item.innerHTML = `<span>${p.icon}</span><small>${p.cost}</small>`;
+                item.onclick = () => {
+                    if (tempDeck.includes(key)) { tempDeck = tempDeck.filter(k => k !== key); item.classList.remove('active'); }
+                    else if (tempDeck.length < maxSlots) { tempDeck.push(key); item.classList.add('active'); }
+                };
+                grid.appendChild(item);
+            }
+            window.confirmSelection = () => {
+                if (tempDeck.length < maxSlots) return;
+                chosenDeck = [...tempDeck];
+                document.getElementById('selectionMenu').style.display = 'none';
+                isPaused = false;
+                updateDeckUI();
+            };
+        }
+
+        function updateDeckUI() {
+            deckContainer.innerHTML = '';
+            chosenDeck.forEach(key => {
+                const p = allPlants[key];
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.innerHTML = `<span>${p.icon}</span><small>${p.cost}</small><div class="cooldown-overlay" id="cd-${key}"></div>`;
+                div.onclick = (e) => {
+                    e.stopPropagation();
+                    if (frame - p.last < p.cd) return;
+                    selectedPlantType = key;
+                    document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+                    div.classList.add('selected');
+                    shovelActive = false;
+                    shovelIcon.classList.remove('selected-shovel');
+                };
+                deckContainer.appendChild(div);
+            });
+        }
+
+        function selectShovel() {
+            shovelActive = !shovelActive;
+            selectedPlantType = '';
+            document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+            shovelActive ? shovelIcon.classList.add('selected-shovel') : shovelIcon.classList.remove('selected-shovel');
+        }
+
+        function placePlant(gx, gy, conf) {
+            plants.push({ x: gx, y: gy, conf, hp: (conf.type === 'defense' ? 1000 : 150), timer: 0, ready: conf.type !== 'mine' });
+            suns -= conf.cost; conf.last = frame; sunDisplay.innerText = suns;
+            selectedPlantType = ''; document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+        }
+
+        function animate() {
+            if (!gameRunning || isPaused) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<10; c++) {
+                    const isWater = (gamePhase === 'water' && (r === 2 || r === 3));
+                    let c1 = (gamePhase === 'night' && !isWater) ? "#2c3e50" : (isWater ? "#2980b9" : "#4a7c44");
+                    let c2 = (gamePhase === 'night' && !isWater) ? "#1a252f" : (isWater ? "#3498db" : "#355e3b");
+                    ctx.fillStyle = (r+c)%2==0 ? c1 : c2;
+                    ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
+                }
+            }
+
+            if(frame % 400 === 0 && wave <= 10) {
+                let rY = Math.floor(Math.random()*rows)*cellSize;
+                const isWaterRow = (rY === 160 || rY === 240);
+                if (gamePhase === 'night' && !isWaterRow && Math.random() > 0.7) zombies.push({x: 800, y: rY, hp: 600, s: 0.4, icon: '🚪🧟', type: 'door'});
+                else if (gamePhase === 'water' && isWaterRow) zombies.push({x: 800, y: rY, hp: 150, s: 0.6, icon: '🏊‍♂️', type: 'normal'});
+                else zombies.push({x: 800, y: rY, hp: 150, s: 0.6, icon: '🧟', type: 'normal'});
+            }
+
+            projectiles.forEach((p, i) => {
+                if (p.homing && zombies.length > 0) {
+                    let target = zombies[0];
+                    let dx = target.x + 25 - p.x, dy = target.y + 30 - p.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    p.x += (dx/dist) * 7; p.y += (dy/dist) * 7;
+                } else p.x += 6;
+                ctx.font = "20px Arial"; ctx.fillText(p.icon || (p.p ? "🔵" : "🟢"), p.x, p.y);
+                zombies.forEach(z => {
+                    if(p.x > z.x && p.x < z.x+50 && Math.abs(p.y - (z.y+45)) < 40) {
+                        z.hp -= p.p ? ((z.type === 'door') ? 300 : 40) : 20;
+                        if(!p.p) projectiles.splice(i,1);
+                    }
+                });
+            });
+
+            plants.forEach(p => {
+                p.timer++;
+                if(p.conf.type === 'mine' && !p.ready && p.timer > 360) p.ready = true;
+                if(p.ready) {
+                    if(p.conf.type === 'attack' && p.timer % 95 === 0) projectiles.push({x: p.x+60, y: p.y+45, p: false, dmg: 20});
+                    if(p.conf.type === 'pierce' && p.timer % 140 === 0) projectiles.push({x: p.x+60, y: p.y+45, p: true, dmg: 40});
+                    if(p.conf.type === 'homing' && p.timer % 80 === 0 && zombies.length > 0) projectiles.push({x: p.x+30, y: p.y+30, homing: true, icon: '📌', dmg: 25, p: false});
+                    if(p.conf.type === 'sun' && p.timer % 500 === 0) fallingSuns.push({x: p.x+20, y: p.y+20, ty: p.y+20, vy: 0, t: 0});
+                }
+                ctx.font = "60px Arial"; ctx.fillText(p.conf.type === 'mine' && !p.ready ? '⏱️' : p.conf.icon, p.x+5, p.y+65);
+            });
+
+            zombies.forEach((z, i) => {
+                let eating = false;
+                plants.forEach(p => { if(z.y === p.y && z.x < p.x + 30 && z.x + 30 > p.x) { eating = true; p.hp -= 0.6; if(p.conf.type === 'mine' && p.ready){ z.hp = 0; p.hp = 0; } } });
+                plants = plants.filter(p => p.hp > 0);
+                if(!eating) z.x -= z.s;
+                ctx.font = "60px Arial"; ctx.fillText(z.icon, z.x, z.y+65);
+                if(z.x < -70) { gameRunning = false; document.getElementById('gameOverScreen').style.display = 'flex'; }
+                if(z.hp <= 0) zombies.splice(i, 1);
+            });
+
+            mowers.forEach(m => {
+                if(m.active) {
+                    ctx.font = "45px Arial"; ctx.fillText("🚜", m.x, m.y + 60);
+                    if(zombies.some(z => z.y === m.y && z.x < m.x + 40)) m.moving = true;
+                    if(m.moving) { m.x += 8; zombies = zombies.filter(z => !(z.y === m.y && z.x < m.x + 60)); if(m.x > 800) m.active = false; }
+                }
+            });
+
+            fallingSuns.forEach((s, i) => { if(s.y < s.ty) s.y += s.vy; s.t++; ctx.font = "35px Arial"; ctx.fillText("☀️", s.x, s.y); if(s.t > 600) fallingSuns.splice(i, 1); });
+            for (let key in allPlants) { const overlay = document.getElementById('cd-' + key); if (overlay) overlay.style.height = (1 - Math.min(1, (frame - allPlants[key].last) / allPlants[key].cd)) * 100 + '%'; }
+            
+            frame++;
+            if(frame % 1500 === 0 && wave < 10) { wave++; waveDisplay.innerText = wave; }
+            requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            fallingSuns = fallingSuns.filter(s => { if(Math.hypot(s.x + 15 - mx, s.y - 15 - my) < 40) { suns += 25; sunDisplay.innerText = suns; return false; } return true; });
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const gx = Math.floor((e.clientX - rect.left) / cellSize) * cellSize;
+            const gy = Math.floor((e.clientY - rect.top) / cellSize) * cellSize;
+            const isWater = (gamePhase === 'water' && (gy/cellSize === 2 || gy/cellSize === 3));
+            if (shovelActive) { plants = plants.filter(p => p.x !== gx || p.y !== gy); selectShovel(); return; }
+            const conf = allPlants[selectedPlantType];
+            if (!conf || suns < conf.cost || (frame - conf.last < conf.cd)) return;
+            const hasLily = plants.some(p => p.x === gx && p.y === gy && p.conf.type === 'lily');
+            const hasPlant = plants.some(p => p.x === gx && p.y === gy && p.conf.type !== 'lily');
+            if (isWater) { if ((conf.type === 'lily' || conf.type === 'homing') && !hasPlant) placePlant(gx, gy, conf); else if (hasLily && !hasPlant) placePlant(gx, gy, conf); }
+            else if (!hasPlant && conf.type !== 'homing') placePlant(gx, gy, conf);
+        });
+
+        window.addEventListener('keydown', (e) => { if (e.key === "Escape") togglePause(); });
+        function togglePause() { isPaused = !isPaused; document.getElementById('menuPause').style.display = isPaused ? 'flex' : 'none'; if (!isPaused) animate(); }
+    </script>
+</body>
+</html>
